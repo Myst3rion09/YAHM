@@ -6,7 +6,6 @@
 
 set -e
 
-LSB_RELEASE="/usr/bin/lsb_release"
 ERROR=1
 
 # Check if we can use colours in our output
@@ -33,83 +32,24 @@ die () {
 	exit 1
 }
 
-if [ "$1" = "quickinstall" ]
-then
-    exit_error()
-    {
-        if [ $ERROR -eq 1 ]
-        then
-            die "An error occurred while processing quickinstall mode. Pleasy try manually installation"
-        fi
-    }
-    trap exit_error EXIT SIGINT SIGTERM
-fi
-
-check_install_deb()
-{
-    progress "Installing dependencies.."
-    packages=$1
-    for P in $packages
-    do
-        dpkg -s "$P" >/dev/null 2>&1 && {
-        info $P is installed
-        } || {
-            install_package "$P"
-        }
-    done
-    info "\t..done"
-}
-
-install_package() {
-	package=$1
-	info "install ${package}"
-	apt-get -qq -y install $package 2>&1 > /dev/null
-	return $?
-}
-
 [ "x$(id -un)" == "xroot" ] || die "Sorry, this script must be run as root."
-
-[ -x $LSB_RELEASE ] || install_package "lsb-release"
 
 # Creating needed folders
 mkdir -p /var/log/yahm
 mkdir -p /var/lib/yahm
 
-# check architecture
-case `dpkg --print-architecture` in
-    armhf|arm64)
-        info "Found ARM based distribution"
-        ;;
-    i386|amd64|i686|x86_64)
-        info "X86 CPU found, need to install QEMU"
-        check_install_deb "qemu-user-static binfmt-support"
-        ;;
-    *)
-        die "Unsupported CPU architecture, we support only ARM and x86"
-        ;;
-esac
-
-DIST_ID="$($LSB_RELEASE -is)"
-CODENAME="$($LSB_RELEASE -cs)"
-INTERFACE="eth0"
-DIST=""
 IS_VERBOSE=0
 
-# Check the distribution is in the supported list
-case "$DIST_ID:$CODENAME" in
-Raspbian:jessie) DIST="debian";;
-Raspbian:stretch) DIST="debian";;
-Debian:jessie)  DIST="debian";;
-Debian:stretch) DIST="debian";;
-Ubuntu:xenial)  DIST="ubuntu";;
-*)		die "Sorry, this script does not support your distribution/release ($DIST_ID $CODENAME)." ;;
-esac
+progress "Install dependencies"
+pacman -Syy > /dev/null
+pacman --noconfirm --needed -S base-devel wget dos2unix lzo python2 python2-pip git lxc bridge-utils patch gzip openssl dtc linux-raspberrypi-headers > /dev/null
+pip2 install python-lzo > /dev/null
+info "\t...done"
 
-progress "Updating sources (can take some time).."
-apt-get -q=2 update
-info "\t..done"
-
-check_install_deb "bash-completion wget dos2unix python git lxc liblzo2-dev bridge-utils python-lzo patch gzip openssl"
+progress "Ensure python2 is used in /opt/YAHM"
+cp share/tools/python/python /usr/local/bin/python
+chmod +x /usr/local/bin/python
+info "\t...done"
 
 progress "Clean up YAHM directory (removing old versions).."
 rm -rf /opt/YAHM
@@ -123,7 +63,7 @@ cd /opt
 #####################################
 #### REMOVE --branch IN MASTER !!!!!#
 #####################################
-git clone --recursive https://github.com/leonsio/YAHM.git 2>>/var/log/yahm/git.log >>/var/log/yahm/git.log
+git clone --recursive https://github.com/Myst3rion09/YAHM.git 2>>/var/log/yahm/git.log >>/var/log/yahm/git.log
 cd /opt/YAHM
 # update modules
 git submodule foreach git pull origin master 2>>/var/log/yahm/git.log >>/var/log/yahm/git.log
@@ -136,87 +76,6 @@ chmod +x /opt/YAHM/bin/*
 ln -sf /opt/YAHM/bin/* /usr/sbin/
 info "\t..done"
 
-progress "Installing bash command completion.."
-ln -sf /opt/YAHM/share/yahm_completion /etc/bash_completion.d/yahm_completion 
-info "\tdone"
-
-if [ "$1" = "ui" ] && [ "$DIST" != "ubuntu" ] 
-then
-    info "\n\tEnter UI mode\n"
-    /opt/YAHM/bin/yahm-ui
-    info "\n\tuse 'yahm-ui' to launch the UI again\n"
-fi
-
-if [ "$1" = "quickinstall" ] && [ "$DIST" != "ubuntu" ] 
-then
-    info "\n\tEnter quick install mode\n"
-
-    if [ "$DIST_ID" = "Raspbian" ] ;
-    then
-
-        if [ $(cat /etc/dhcpcd.conf | grep -v "^#" | grep "interface " | wc -l) -gt 0 ] ;
-          then
-            die "Custom network configuration is not supported, please use manual installation"
-        fi
-
-        info "Disable new dhcpcd on Raspbian"
-        systemctl disable dhcpcd.service
-        systemctl stop dhcpcd.service
-
-        if [ "$CODENAME" = "jessie" ] ;
-          then
-        sed -i /etc/network/interfaces -e "s/iface eth0 inet manual/auto eth0\niface eth0 inet dhcp/"
-          fi
-
-        if [ "$CODENAME" = "stretch" ] ;
-        then
-        #      INTERFACE=`ls /sys/class/net | grep enx`
-          cat >> "/etc/network/interfaces" <<EOF
-auto lo
-iface lo inet loopback
-
-auto ${INTERFACE}
-iface ${INTERFACE} inet dhcp
-
-EOF
-        fi
-    fi
-    info "ATTENTION: For log files see /var/log/yahm"
-    progress "\n\tInstalling LXC container (can take some time)"
-    /opt/YAHM/bin/yahm-lxc install
-    info "\tYAHM LXC container was installed successfully\n"
-
-    progress "\tCreating Bridge for networking"
-    /opt/YAHM/bin/yahm-network -i ${INTERFACE} -r 0 -w create_bridge  2>>/var/log/yahm/network_create.log >>/var/log/yahm/network_create.log
-    info "\tBridge yahmbr0 with interface eth0 was created\n"
-
-    progress "\tAttaching network configuration to LXC container"
-    /opt/YAHM/bin/yahm-network attach_bridge  2>>/var/log/yahm/network_attach.log >>/var/log/yahm/network_attach.log
-    info "\tyahmbr0 was attached to YAHM LXC container\n"
-
-    #progress "\n\tStarting LXC container (timeout 20 seconds )\n"
-    #lxc-start -n yahm -d 2>>/var/log/yahm/ccu_start.log >>/var/log/yahm/ccu_start.log
-    #sleep 20
-    #info "\tYAHM started\n"
-
-    source /opt/YAHM/share/tools/arm-board-detect/armhwinfo.sh
-
-    if [ "$BOARD_TYPE" = "Raspberry Pi" ] || [ "$BOARD_TYPE" = "ASUS" ]
-    then
-        info "\tFound ${BOARD_TYPE} hardware, installing pivccu-driver\n"
-        /opt/YAHM/bin/yahm-module -m pivccu-driver enable
-    else
-        info "Automatic module installation currently only supported on raspberry pi or asus tinker board"
-        info "To disable homematic-ip warnings, please run 'yahm-module -f -m homematic-ip disable'"
-    fi
-    
-    info "ATTENTION: Please verify your network configuration (/etc/network/interfaces)"
-    info "WARNING: You may became new IP-address after reboot"
-    info "YAHM was successfully installed, please restart your system, to activate new networking configuration"
-    # Disable Error handling
-    ERROR=0
-else
-    # Info
-    info "Please see 'yahm-lxc' for creating new container, 'yahm-network' for network configuration and 'yahm-modules' for additional modules" 
-    ERROR=0
-fi
+# Info
+info "Please see 'yahm-lxc' for creating new container, 'yahm-network' for network configuration and 'yahm-modules' for additional modules" 
+ERROR=0
