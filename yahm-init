@@ -76,6 +76,14 @@ chmod +x /opt/YAHM/bin/*
 ln -sf /opt/YAHM/bin/* /usr/sbin/
 info "\t..done"
 
+info "Create LXC container"
+/opt/YAHM/bin/yahm-lxc install
+info "\t...done"
+
+info "Install piVCCU module"
+/opt/YAHM/bin/yahm-module -m pivccu-driver enable
+info "\t...done"
+
 # Info
-info "Please see 'yahm-lxc' for creating new container, 'yahm-network' for network configuration and 'yahm-modules' for additional modules" 
+info "Container is created, please use 'yahm-ctl -n yahm start' to start and 'yahm-ctl -n yahm join' for console access
 ERROR=0
