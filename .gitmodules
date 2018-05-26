@@ -4,12 +4,9 @@
 [submodule "share/tools/arm-board-detect"]
 	path = share/tools/arm-board-detect
 	url = https://github.com/leonsio/arm-board-detect.git
-[submodule "share/tools/rpi-source"]
-	path = share/tools/rpi-source
-	url = https://github.com/notro/rpi-source
-[submodule "share/modules"]
-	path = share/modules
-	url = https://github.com/leonsio/YAHM-Module
 [submodule "share/firmware"]
 	path = share/firmware
 	url = https://github.com/leonsio/YAHM-Firmware
+[submodule "share/modules/share/piVCCU"]
+	path = share/modules/share/piVCCU
+	url = https://github.com/leonsio/piVCCU.git

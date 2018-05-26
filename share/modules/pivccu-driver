@@ -1,0 +1,173 @@
+#!/bin/bash
+#
+# generic raw-uart solution based on pivccu: Alexander Reinert <alex@areinert.de>
+#
+
+description="Driver for HM-MOD-RPI-PCB with Homematic-IP for Archlinux ARM"
+module_version="0.2"
+
+# Default Parameter
+file_rfd_conf="${LXC_ROOT_FS}/usr/local/etc/config/rfd.conf"
+reboot=0 # Neustart notwendig
+
+kernel_version=$(uname -r | sed -e 's/-.*//i')
+
+_module_install()
+{
+
+    WORK_DIR=$(mktemp -d)
+    # Aktuelle Kernel Version
+    kernel_version=$(uname -r | sed -e 's/-.*//i')
+
+    [ "x$(id -un)" == "xroot" ] || die "Sorry, this script must be run as root. Try sudo ...."
+
+    info "Found kernel:   ${kernel_version} "
+
+    # load actual config
+    modprobe configs
+
+    ###########################
+    # Building kernel modules #
+    ###########################
+
+    info "Installing kernel modules"
+
+    cd $WORK_DIR
+    # Download generic uart sources
+    cp -rf ${YAHM_DIR}/share/modules/share/piVCCU/* .
+    cd kernel
+    cp ${YAHM_DIR}/share/modules/share/kernel-modules/eq3_char_loop/*.c .
+
+    # building
+    progress "Building eq3 kernel modules"
+    make
+    if [ $? -ne 0 ]
+    then
+        die "ERROR: Problem while building eq3 module, exit"
+    fi
+
+    # copy binaries
+    mkdir -p /lib/modules/$(uname -r)/kernel/drivers/pivccu
+    cp *.ko /lib/modules/$(uname -r)/kernel/drivers/pivccu
+
+    # regenerate modules list
+    progress "Regenerating modules.dep and map files"
+    depmod -a
+
+    #################################################
+    #   Overlay erstellen
+    #################################################
+
+    info "Installing/Setup overlay file"
+
+    OVERLAY_FILE='pivccu-bcm2835.dtbo'
+
+    TMP_DIR=`mktemp -d`
+    cp -rf ${YAHM_DIR}/share/modules/share/piVCCU/dts $TMP_DIR
+
+    if [ -z "${TMP_DIR}/dts/${OVERLAY_FILE}" ]
+    then
+        die "ERROR: Overlay file ${OVERLAY_FILE} not found or hardware not supported"
+    fi
+
+    # converting dtb to ascii dts
+    progress "Installing dependencies"
+
+    progress "Creating Overlay files"
+    cd $TMP_DIR/dts
+    for dts in $(find *.dts -type f)
+    do
+        dtc -@ -I dts -O dtb -o ${dts%.dts}.dtbo $dts
+    done
+
+    OVERLAY=`basename "$OVERLAY_FILE" .dtbo`
+
+    reboot=$((reboot+1))
+    rm -rf $TMP_DIR
+
+    #############
+    #  Generic  #
+    # ###########
+
+    # multimacd needs rt scheduling to work
+    info "Setup Kernel Scheduler"
+    sysctl -w kernel.sched_rt_runtime_us=-1
+
+    # Treiber beim Booten laden
+    if [ $(cat /etc/modules-load.d/pivccu.conf | grep "^eq3_char_loop" | wc -l) -eq 0 ]
+    then
+        echo eq3_char_loop >> /etc/modules-load.d/pivccu.conf
+        reboot=$((reboot+1))
+    fi
+    if [ $(cat /etc/modules-load.d/pivccu.conf | grep "^plat_eq3ccu2" | wc -l) -eq 0 ]
+    then
+        echo plat_eq3ccu2 >> /etc/modules-load.d/pivccu.conf
+        reboot=$((reboot+1))
+    fi
+
+    progress "Preparing modification rfd.conf..."
+    if [ ! -f $file_rfd_conf ]
+    then
+	    cp ${LXC_ROOT_FS}/etc/config_templates/rfd.conf $file_rfd_conf
+    fi
+
+    if [ $(cat $file_rfd_conf | grep "\[Interface 0\]"|wc -l) -eq 0 ];then
+        info "[Interface 0] block in rfd.conf not found, insert it..."
+        echo -e "\n[Interface 0]\nType = CCU2\nComPortFile = /dev/mmd_bidcos\n#AccessFile = /dev/null\n#ResetFile = /dev/ccu2-ic200" >> $file_rfd_conf
+        info "Insert in rfd.conf done."
+    else
+        info "[Interface 0] block found in rfd.conf checking it..."
+        # aendern
+        sed  -e 's/#\[Interface 0\]/\[Interface 0\]/' -i $file_rfd_conf
+        sed  -e 's/#Type = CCU2/Type = CCU2/' -i $file_rfd_conf
+        sed  -e 's/#ComPortFile = \/dev\/mmd_bidcos/ComPortFile = \/dev\/mmd_bidcos/' -i $file_rfd_conf
+
+        info "Modification rfd.conf done."
+    fi
+
+    progress "Changing multimacd files"
+    # Init Skript
+    sed -i ${LXC_ROOT_FS}/etc/init.d/S60multimacd -e "s/bcm2835-raw-uart/mxs_auart_raw.0/g"
+    # Multimac Config
+    if [ ! -f ${LXC_ROOT_FS}/usr/local/etc/config/multimacd.conf  ]
+    then
+        cp ${LXC_ROOT_FS}/etc/config_templates/multimacd.conf  ${LXC_ROOT_FS}/usr/local/etc/config/multimacd.conf
+    fi
+    sed -i ${LXC_ROOT_FS}/usr/local/etc/config/multimacd.conf -e "s/bcm2835-raw-uart/mxs_auart_raw.0/g"
+
+    progress "Changing lxc config"
+    sed -i $LXC_ROOT/config -e "s/lxc.cgroup.devices.allow = c 245:1 rwm/lxc.cgroup.devices.allow = c 241:* rwm/"
+    sed -i $LXC_ROOT/config -e "s/lxc.cgroup.devices.allow = c 242:0 rwm/lxc.cgroup.devices.allow = c 242:* rwm/"
+    sed -i $LXC_ROOT/config -e "s/lxc.cgroup.devices.allow = c 243:0 rwm/lxc.cgroup.devices.allow = c 243:* rwm/"
+    sed -i $LXC_ROOT/config -e "s/lxc.cgroup.devices.allow = c 244:0 rwm/lxc.cgroup.devices.allow = c 244:* rwm/"
+    sed -i $LXC_ROOT/config -e "s/lxc.cgroup.devices.allow = c 245:0 rwm/lxc.cgroup.devices.allow = c 245:* rwm/"
+    sed -i $LXC_ROOT/config -e "s/lxc.cgroup.devices.allow = c 246:0 rwm/lxc.cgroup.devices.allow = c 246:* rwm/"
+
+    if [ $(cat $LXC_ROOT/config | grep "^lxc.hook.pre-start" | wc -l) -eq 0 ]
+    then
+        echo "lxc.hook.pre-start=/var/lib/yahm/pre-start.sh" >> $LXC_ROOT/config
+    fi
+
+    if [ $(cat $LXC_ROOT/config | grep "^lxc.hook.start" | wc -l) -eq 0 ]
+    then
+        echo "lxc.hook.start=/bin/yahm-start.sh" >> $LXC_ROOT/config
+    fi
+
+    progress "Copy startup files"
+    cp -rf  ${YAHM_DIR}/share/modules/share/pre-start.sh /var/lib/yahm/pre-start.sh
+    chmod +x /var/lib/yahm/pre-start.sh
+    cp -rf  ${YAHM_DIR}/share/modules/share/yahm-start.sh /var/lib/lxc/${LXCNAME}/rootfs/bin/yahm-start.sh
+    chmod +x /var/lib/lxc/${LXCNAME}/rootfs/bin/yahm-start.sh
+
+    # Reboot
+    if [ $reboot -gt 0 ]
+    then
+#        echo "======================================"
+#        echo "Rebooting in 60 seconds to apply settings (to chancel reboot type 'shutdown -c')..."
+#        echo "======================================"
+#        shutdown -r +1 "Rebooting to disable serial console"
+        info "PIVCCU was installed successfully, please restart your system to apply changes"
+    else
+        info "PIVCCU was installed successfully, please restart YAHM to apply changes"
+    fi
+}
