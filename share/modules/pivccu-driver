@@ -26,6 +26,40 @@ _module_install()
     # load actual config
     modprobe configs
 
+    ################################
+    #  OS/Board specific settings  #
+    ################################
+
+    if [ ! -f /boot/config.txt ] && [ $IS_FORCE -ne 1 ]
+    then
+        die "ERROR: File /boot/config.txt does not exist!"
+    fi
+
+    progress "Trying to disable bluetooth on Raspberry Pi 3 to use HM-MOD-RPI-PCB"
+
+    if [ $(cat /boot/config.txt | grep pi3-miniuart-bt | wc -l ) -eq 0 ]
+    then
+        echo -e "\n# Allow the normal UART pins to work\ndtoverlay=pi3-miniuart-bt\nenable_uart=1\nforce_turbo=1" >> /boot/config.txt
+        info "Modification /boot/config.txt done."
+        reboot=$((reboot+1))
+    fi
+
+    # Disable serial
+    progress "Trying to disable serial console"
+    if [ ! -f $file_cmdline_txt ] && [ $IS_FORCE -ne 1 ]
+    then
+        die "ERROR: File $file_cmdline_txt does not exist!"
+    fi
+
+    if [ $(cat /boot/cmdline.txt|grep "console=serial0,115200"|wc -l) -gt 0 ];then
+        sed -i /boot/cmdline.txt -e "s/console=ttyAMA0,[0-9]\+ //"
+        sed -i /boot/cmdline.txt -e "s/console=serial0,[0-9]\+ //"
+        reboot=$((reboot+1))
+        info "Serial disabled successfully."
+    else
+        info "Serial already disabled"
+    fi
+
     ###########################
     # Building kernel modules #
     ###########################
@@ -65,22 +99,23 @@ _module_install()
     TMP_DIR=`mktemp -d`
     cp -rf ${YAHM_DIR}/share/modules/share/piVCCU/dts $TMP_DIR
 
-    if [ -z "${TMP_DIR}/dts/${OVERLAY_FILE}" ]
+    if [ -z "${TMP_DIR}/dts/pivccu-bcm2835.dtbo" ]
     then
-        die "ERROR: Overlay file ${OVERLAY_FILE} not found or hardware not supported"
+        die "ERROR: Overlay file pivccu-bcm2835.dtbo not found or hardware not supported"
     fi
-
-    # converting dtb to ascii dts
-    progress "Installing dependencies"
 
     progress "Creating Overlay files"
     cd $TMP_DIR/dts
-    for dts in $(find *.dts -type f)
-    do
-        dtc -@ -I dts -O dtb -o ${dts%.dts}.dtbo $dts
-    done
+    dtc -@ -I dts -O dtb -o pivccu-bcm2835.dtbo pivccu-bcm2835.dts
+   
+    # check if exists
+    if [ $(cat /boot/config.txt | grep pivccu-bcm2835 | wc -l ) -eq 0 ]
+    then
+        progress "Changing /boot/config.txt"
+        echo "dtoverlay=pivccu-bcm2835.dtbo" >> /boot/config.txt
+    fi
 
-    OVERLAY=`basename "$OVERLAY_FILE" .dtbo`
+    cp -r $TMP_DIR/dts/pivccu-bcm2835.dtbo /boot/overlays/
 
     reboot=$((reboot+1))
     rm -rf $TMP_DIR
