@@ -42,7 +42,7 @@ IS_VERBOSE=0
 
 progress "Install dependencies"
 pacman -Syy > /dev/null
-pacman --noconfirm --needed -S base-devel wget dos2unix lzo python2 python2-pip git lxc bridge-utils patch gzip openssl dtc linux-raspberrypi-headers > /dev/null
+pacman --noconfirm --needed -S base-devel wget dos2unix lzo python2 python2-pip git lxc bridge-utils patch gzip openssl dtc linux-raspberrypi-headers dnsmasq> /dev/null
 pip2 install python-lzo > /dev/null
 info "\t...done"
 
@@ -82,6 +82,18 @@ info "\t...done"
 
 info "Install piVCCU module"
 /opt/YAHM/bin/yahm-module -m pivccu-driver enable
+info "\t...done"
+
+info "Create network bridge"
+if [ $(cat /etc/default/lxc | grep "USE_LXC_BRIDGE=\"false\"" | wc -l) -eq 0 ]
+then
+    sed -i /etc/default/lxc -e "s/USE_LXC_BRIDGE=\"false\"/USE_LXC_BRIDGE=\"true\"/"
+fi
+
+systemctl enable lxc-net.service
+systemctl start lxc-net.service
+
+/opt/YAHM/bin/yahm-network -b lxcbr0 attach_bridge
 info "\t...done"
 
 # Info
