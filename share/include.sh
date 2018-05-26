@@ -69,9 +69,6 @@ ARCH=""
 # Default behavior YAHM
 DRY_RUN=0
 RESTART=1
-LSB_RELEASE="/usr/bin/lsb_release"
-DIST_ID="$($LSB_RELEASE -is)"
-CODENAME="$($LSB_RELEASE -cs)"
 
 # Check if we can use colours in our output
 use_colour=0
@@ -117,20 +114,6 @@ else
     echo "ARCH='$ARCH'" >> ${YAHM_LIB}/systeminfo
     echo "BOARD_VERSION='$BOARD_VERSION'" >> ${YAHM_LIB}/systeminfo
 fi
-
-# check architecture 
-#case `dpkg --print-architecture` in
-case $ARCH in
-    armhf|armv6l|armv7l|arm64|aarch64)
-        ARCH="ARM"
-        ;;
-    i386|amd64|x86_64|i686)
-        ARCH="X86"
-        ;;
-    *)
-        die "Unsupported CPU architecture, we support only ARM and x86"
-        ;;
-esac
 
 while getopts "${PARAMETER}" OPTION
 do
@@ -398,13 +381,6 @@ check_install_deb()
             install_package "$P"
         }
     done
-}
-
-install_package() {
-    package=$1
-    info "install ${package}"
-    apt-get -qq -y install $package 2>&1 > /dev/null
-    return $?
 }
 
 ### Shared Network functionality
