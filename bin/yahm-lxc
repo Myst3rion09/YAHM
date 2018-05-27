@@ -217,14 +217,14 @@ lxc.mount.entry = varfs var tmpfs defaults,size=196M 0 0
 lxc.mount.entry = devpts dev/pts devpts defaults,newinstance 0 0
 lxc.mount.entry = /var/lib/yahm/SDcard/${LXCNAME}/sd-mmcblk0  media/sd-mmcblk0/ none defaults,bind 0 0
 
-lxc.utsname = ${LXCNAME}
-lxc.rootfs = ${LXC_ROOT_FS}
+lxc.uts.name = ${LXCNAME}
+lxc.rootfs.path = ${LXC_ROOT_FS}
 
 # autostart disable-> lxc.start.auto=0
 lxc.start.auto = 1
 
-lxc.tty = 1
-lxc.pts = 1
+lxc.tty.max = 1
+lxc.pty.max = 1
 
 # cgroups
 lxc.cgroup.devices.allow = a
